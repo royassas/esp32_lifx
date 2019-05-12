@@ -1,3 +1,5 @@
+#include <Esp32WifiManager.h>
+
 /*
  LIFX bulb emulator by Kayne Richens (kayno@kayno.net)
 
@@ -24,15 +26,12 @@
  */
 
 #include <EEPROM.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <LPD6803.h>
-#include <WiFiUDP.h>
-#include <WiFiManager.h>
+#include <FastLED.h>
+#include <Esp32WifiManager.h>
 
 #include "lifx.h"
-//#include "RGBMoodLifx.h"
 #include "color.h"
 
 // define to output debug messages (including packet dumps) to serial (38400 baud)
@@ -49,20 +48,20 @@
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
 byte mac[] = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+  0x86, 0x32, 0x98, 0x63, 0x4a, 0x78
 };
 byte site_mac[] = {
   0x4c, 0x49, 0x46, 0x58, 0x56, 0x32
 }; // spells out "LIFXV2" - version 2 of the app changes the site address to this...
 
-// ldp6803
-#define LED_COUNT 1
-#define PIN_DATA  13
-#define PIN_CLOCK 14
-LPD6803 led_strip = LPD6803(LED_COUNT, PIN_DATA, PIN_CLOCK);
+//WS2801 for FastLED
+#define NUM_LEDS 10
+#define DATA_PIN 26
+#define CLOCK_PIN 27
+CRGB leds[NUM_LEDS];
 
 // label (name) for this bulb
-char bulbLabel[LifxBulbLabelLength] = "LED lamp";
+char bulbLabel[LifxBulbLabelLength] = "Nachtlicht";
 
 // tags for this bulb
 char bulbTags[LifxBulbTagsLength] = {
@@ -82,7 +81,7 @@ long dim = 0;
 WiFiUDP Udp;
 WiFiServer TcpServer(LifxPort);
 WiFiClient client;
-
+WifiManager wifiManager;
 /*
  * If no knwon network was found, change to access point mode.
  * Color = All red
@@ -101,45 +100,36 @@ void connectingSuccess() {
   Serial.print ("IP address: ");
   Serial.println (WiFi.localIP());
 
-  led_strip.setPixelColor (0, 0, 255, 0);
-  led_strip.show ();
+  leds[0] = CRGB::Green;
+  FastLED.show();
   delay(500);
-  led_strip.setPixelColor (0, 0, 0, 0);
-  led_strip.show ();
+  leds[0] = CRGB::Black;
+  FastLED.show();
   delay(500);
-  led_strip.setPixelColor (0, 0, 255, 0);
-  led_strip.show ();
+  leds[0] = CRGB::Green;
+  FastLED.show();
   delay(500);
-  led_strip.setPixelColor (0, 0, 0, 0);
-  led_strip.show ();
+  leds[0] = CRGB::Black;
+  FastLED.show();
 }
 
 void setup() {
 
   Serial.begin(115200);
-  debug_println(F("LIFX bulb emulator for Esp8266 starting up..."));
+
+  FastLED.addLeds<WS2801, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);
+  
+  debug_println(F("LIFX bulb emulator for Esp32 starting up..."));
 
   // WIFI
-  WiFiManager wifiManager;
-  wifiManager.setDebugOutput(false);
-  wifiManager.setAPCallback(configModeCallback);
   
-  if (!wifiManager.autoConnect(bulbLabel)) {
-    debug_println("failed to connect and hit timeout");
-    //reset and try again, or maybe put it to deep sleep
-    ESP.reset();
-    delay(1000);
-  }
+  wifiManager.setup();
 
   // LEDS
-  led_strip.begin();
-  led_strip.setPixelColor(0, 0, 0, 255);
-  led_strip.show();
+  leds[0] = CRGB::Blue;
+  FastLED.show();
   debug_println("LEDS initalized");
-  
-  // Connecting is succeeded
-  connectingSuccess();
- 
+   
   // Set mac address
   WiFi.macAddress(mac);
 
@@ -212,7 +202,8 @@ void setup() {
 }
 
 void loop() {
-  if (led_strip.outputReady ())
+  wifiManager.loop();
+  if (wifiManager.getState() == Connected)
   {
     // buffers for receiving and sending data
     byte PacketBuffer[128]; //buffer to hold incoming packet,
@@ -272,6 +263,9 @@ void loop() {
       handleRequest(request);
 
     }
+  } else {
+    Serial.println(wifiManager.getState());
+    delay(1000);
   }
 
   delay (0);
@@ -916,14 +910,14 @@ void setLight() {
     uint8_t b = map(rgbColor[2], 0, 255, 0, 32);
     
     // LIFXBulb.fadeHSB(this_hue, this_sat, this_bri);
-    led_strip.setPixelColor (0, r, g, b);
+    leds[0].setRGB( r, g, b);
   }
   else {
 
     // LIFXBulb.fadeHSB(0, 0, 0);
-    led_strip.setPixelColor (0, 0, 0, 0);
+    leds[0] = CRGB::Black;
   }
-  led_strip.show ();
+  FastLED.show();
 }
 
 /******************************************************************************
