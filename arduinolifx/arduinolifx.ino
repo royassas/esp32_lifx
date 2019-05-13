@@ -1,29 +1,29 @@
 #include <Esp32WifiManager.h>
 
 /*
- LIFX bulb emulator by Kayne Richens (kayno@kayno.net)
+  LIFX bulb emulator by Kayne Richens (kayno@kayno.net)
 
- Emulates a LIFX bulb. Connect an RGB LED (or LED strip via drivers)
- to redPin, greenPin and bluePin as you normally would on an
- ethernet-ready Arduino and control it from the LIFX app!
+  Emulates a LIFX bulb. Connect an RGB LED (or LED strip via drivers)
+  to redPin, greenPin and bluePin as you normally would on an
+  ethernet-ready Arduino and control it from the LIFX app!
 
- Notes:
- - Only one client (e.g. app) can connect to the bulb at once
+  Notes:
+  - Only one client (e.g. app) can connect to the bulb at once
 
- Set the following variables below to suit your Arduino and network
- environment:
- - mac (unique mac address for your arduino)
- - redPin (PWM pin for RED)
- - greenPin  (PWM pin for GREEN)
- - bluePin  (PWM pin for BLUE)
+  Set the following variables below to suit your Arduino and network
+  environment:
+  - mac (unique mac address for your arduino)
+  - redPin (PWM pin for RED)
+  - greenPin  (PWM pin for GREEN)
+  - bluePin  (PWM pin for BLUE)
 
- Made possible by the work of magicmonkey:
- https://github.com/magicmonkey/lifxjs/ - you can use this to control
- your arduino bulb as well as real LIFX bulbs at the same time!
+  Made possible by the work of magicmonkey:
+  https://github.com/magicmonkey/lifxjs/ - you can use this to control
+  your arduino bulb as well as real LIFX bulbs at the same time!
 
- And also the RGBMood library by Harold Waterkeyn, which was modified
- slightly to support powering down the LED
- */
+  And also the RGBMood library by Harold Waterkeyn, which was modified
+  slightly to support powering down the LED
+*/
 
 #include <EEPROM.h>
 #include <WiFi.h>
@@ -34,15 +34,17 @@
 #include "lifx.h"
 #include "color.h"
 
+#define EEPROM_SIZE 256
+
 // define to output debug messages (including packet dumps) to serial (38400 baud)
 #define DEBUG
 
 #ifdef DEBUG
- #define debug_print(x, ...) Serial.print (x, ## __VA_ARGS__)
- #define debug_println(x, ...) Serial.println (x, ## __VA_ARGS__)
+#define debug_print(x, ...) Serial.print (x, ## __VA_ARGS__)
+#define debug_println(x, ...) Serial.println (x, ## __VA_ARGS__)
 #else
- #define debug_print(x, ...)
- #define debug_println(x, ...)
+#define debug_print(x, ...)
+#define debug_println(x, ...)
 #endif
 
 // Enter a MAC address and IP address for your controller below.
@@ -69,6 +71,24 @@ char bulbTags[LifxBulbTagsLength] = {
 };
 char bulbTagLabels[LifxBulbTagLabelsLength] = "";
 
+//location for this bulb
+byte location[] = {
+  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15, 0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
+};
+char bulbLocationLabel[LifxBulbLocationLabelLength] = "Nirvana";
+byte loc_updatedAt[] = {
+  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
+};
+
+//group for this bulb
+byte group[] = {
+  0x00, 0xc3, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15, 0x00, 0xc2, 0x39, 0x63, 0x7a, 0x14, 0x9e, 0x15
+};
+char bulbGroupLabel[LifxBulbGroupLabelLength] = "Mobil";
+byte group_updatedAt[] = {
+  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
+};
+
 // initial bulb values - warm white!
 long power_status = 65535;
 long hue = 0;
@@ -82,54 +102,28 @@ WiFiUDP Udp;
 WiFiServer TcpServer(LifxPort);
 WiFiClient client;
 WifiManager wifiManager;
-/*
- * If no knwon network was found, change to access point mode.
- * Color = All red
- */
-void configModeCallback () {
-  debug_println("Entered config mode");
-  debug_println(WiFi.softAPIP());
-}
 
-/*
- * Connecting to network succeeded
- * Color = blink green twice
- */
-void connectingSuccess() {
-  debug_println("connected!");
-  Serial.print ("IP address: ");
-  Serial.println (WiFi.localIP());
-
-  leds[0] = CRGB::Green;
-  FastLED.show();
-  delay(500);
-  leds[0] = CRGB::Black;
-  FastLED.show();
-  delay(500);
-  leds[0] = CRGB::Green;
-  FastLED.show();
-  delay(500);
-  leds[0] = CRGB::Black;
-  FastLED.show();
-}
 
 void setup() {
 
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("LIFX bulb emulator for Esp32 starting up...");
 
-  FastLED.addLeds<WS2801, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);
-  
-  debug_println(F("LIFX bulb emulator for Esp32 starting up..."));
-
+  //EEPROM
+  if (!EEPROM.begin(EEPROM_SIZE))
+  {
+    Serial.println("failed to initialise EEPROM"); delay(1000000);
+  }
   // WIFI
-  
   wifiManager.setup();
 
   // LEDS
+  FastLED.addLeds<WS2801, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);
   leds[0] = CRGB::Blue;
   FastLED.show();
   debug_println("LEDS initalized");
-   
+
   // Set mac address
   WiFi.macAddress(mac);
 
@@ -166,6 +160,14 @@ void setup() {
     }
 
     debug_println();
+    debug_print(F("Bulb Location: "));
+
+    for (int i = 0; i < LifxBulbLocationLabelLength; i++) {
+      bulbLocationLabel[i] = EEPROM.read(EEPROM_LOCATION_START + LifxBulbLocationIDLength + i);
+      debug_print(bulbLocationLabel[i]);
+    }
+
+    debug_println();
     debug_println(F("Done reading EEPROM config."));
   } else {
     // first time sketch has been run, set defaults into EEPROM
@@ -186,7 +188,7 @@ void setup() {
     for (int i = 0; i < LifxBulbTagLabelsLength; i++) {
       EEPROM.write(EEPROM_BULB_TAG_LABELS_START + i, bulbTagLabels[i]);
     }
-
+    EEPROM.commit();
     debug_println(F("Done writing EEPROM config."));
   }
 
@@ -356,7 +358,7 @@ void handleRequest(LifxPacket &request) {
         bri = word(request.data[6], request.data[5]);
         kel = word(request.data[8], request.data[7]);
 
-        for(int i=0; i<request.data_size; i++){
+        for (int i = 0; i < request.data_size; i++) {
           debug_print(request.data[i], HEX);
           debug_print(SPACE);
         }
@@ -467,12 +469,21 @@ void handleRequest(LifxPacket &request) {
       {
         // set if we are setting
         if (request.packet_type == SET_BULB_LABEL) {
+          int flag = 0;
           for (int i = 0; i < LifxBulbLabelLength; i++) {
             if (bulbLabel[i] != request.data[i]) {
+              flag = 1;
               bulbLabel[i] = request.data[i];
               EEPROM.write(EEPROM_BULB_LABEL_START + i, request.data[i]);
             }
           }
+
+          if (flag == 1) {
+            debug_print("Bulb label has changed - writing to EEPROM... ");
+            EEPROM.commit();
+            debug_print("complete!");
+          }
+
         }
 
         // respond to both get and set commands
@@ -490,11 +501,17 @@ void handleRequest(LifxPacket &request) {
       {
         // set if we are setting
         if (request.packet_type == SET_BULB_TAGS) {
+          int flag = 0;
           for (int i = 0; i < LifxBulbTagsLength; i++) {
             if (bulbTags[i] != request.data[i]) {
               bulbTags[i] = lowByte(request.data[i]);
               EEPROM.write(EEPROM_BULB_TAGS_START + i, request.data[i]);
             }
+          }
+          if (flag == 1) {
+            debug_print("Bulb tags have changed - writing to EEPROM... ");
+            EEPROM.commit();
+            debug_print("complete!");
           }
         }
 
@@ -513,11 +530,17 @@ void handleRequest(LifxPacket &request) {
       {
         // set if we are setting
         if (request.packet_type == SET_BULB_TAG_LABELS) {
+          int flag = 0;
           for (int i = 0; i < LifxBulbTagLabelsLength; i++) {
             if (bulbTagLabels[i] != request.data[i]) {
               bulbTagLabels[i] = request.data[i];
               EEPROM.write(EEPROM_BULB_TAG_LABELS_START + i, request.data[i]);
             }
+          }
+          if (flag == 1) {
+            debug_print("Bulb tag labels have changed - writing to EEPROM... ");
+            EEPROM.commit();
+            debug_print("complete!");
           }
         }
 
@@ -529,8 +552,107 @@ void handleRequest(LifxPacket &request) {
         sendPacket(response);
       }
       break;
+    case DEVICE_SET_LOCATION:
+    case DEVICE_GET_LOCATION:
+      {
+        // set if we are setting
+        if (request.packet_type == DEVICE_SET_LOCATION) {
+          int flag = 0;
+          for (int i = 0; i < (LifxBulbLocationIDLength + LifxBulbLocationLabelLength + LifxBulbLocationUpdatedAtLength); i++) {
+            if (i < LifxBulbLocationIDLength) {
+              if (location[i] != request.data[i]) {
+                location[i] = request.data[i];
+                EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
+              }
+            } else if (i < LifxBulbLocationLabelLength) {
+              if (bulbLocationLabel[i] != request.data[i]) {
+                bulbLocationLabel[i] = request.data[i];
+                EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
+              }
+            } else {
+              if (loc_updatedAt[i] != request.data[i]) {
+                loc_updatedAt[i] = request.data[i];
+                EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
+              }
+            }
 
+          }
+          if (flag == 1) {
+            debug_print("Bulb location has changed - writing to EEPROM... ");
+            EEPROM.commit();
+            debug_print("complete!");
+          }
+        }
 
+        // respond to both get and set commands
+        response.packet_type = DEVICE_STATE_LOCATION;
+        response.protocol = LifxProtocol_AllBulbsResponse;
+        byte LocationData[] = {
+          //Location
+          lowByte(location[0]),
+          lowByte(location[1]),
+          lowByte(location[2]),
+          lowByte(location[3]),
+          lowByte(location[4]),
+          lowByte(location[5]),
+          lowByte(location[6]),
+          lowByte(location[7]),
+          lowByte(location[8]),
+          lowByte(location[9]),
+          lowByte(location[10]),
+          lowByte(location[11]),
+          lowByte(location[12]),
+          lowByte(location[13]),
+          lowByte(location[14]),
+          lowByte(location[15]),
+          //Label
+          lowByte(bulbLocationLabel[0]),
+          lowByte(bulbLocationLabel[1]),
+          lowByte(bulbLocationLabel[2]),
+          lowByte(bulbLocationLabel[3]),
+          lowByte(bulbLocationLabel[4]),
+          lowByte(bulbLocationLabel[5]),
+          lowByte(bulbLocationLabel[6]),
+          lowByte(bulbLocationLabel[7]),
+          lowByte(bulbLocationLabel[8]),
+          lowByte(bulbLocationLabel[9]),
+          lowByte(bulbLocationLabel[10]),
+          lowByte(bulbLocationLabel[11]),
+          lowByte(bulbLocationLabel[12]),
+          lowByte(bulbLocationLabel[13]),
+          lowByte(bulbLocationLabel[14]),
+          lowByte(bulbLocationLabel[15]),
+          lowByte(bulbLocationLabel[16]),
+          lowByte(bulbLocationLabel[17]),
+          lowByte(bulbLocationLabel[18]),
+          lowByte(bulbLocationLabel[19]),
+          lowByte(bulbLocationLabel[20]),
+          lowByte(bulbLocationLabel[21]),
+          lowByte(bulbLocationLabel[22]),
+          lowByte(bulbLocationLabel[23]),
+          lowByte(bulbLocationLabel[24]),
+          lowByte(bulbLocationLabel[25]),
+          lowByte(bulbLocationLabel[26]),
+          lowByte(bulbLocationLabel[27]),
+          lowByte(bulbLocationLabel[28]),
+          lowByte(bulbLocationLabel[29]),
+          lowByte(bulbLocationLabel[30]),
+          lowByte(bulbLocationLabel[31]),
+          //Updated_at
+          lowByte(loc_updatedAt[0]),
+          lowByte(loc_updatedAt[1]),
+          lowByte(loc_updatedAt[2]),
+          lowByte(loc_updatedAt[3]),
+          lowByte(loc_updatedAt[4]),
+          lowByte(loc_updatedAt[5]),
+          lowByte(loc_updatedAt[6]),
+          lowByte(loc_updatedAt[7])
+        };
+        memcpy(response.data, LocationData, sizeof(LocationData));
+        response.data_size = sizeof(LocationData);
+        sendPacket(response);
+      }
+      break;
     case GET_VERSION_STATE:
       {
         // respond to get command
@@ -556,10 +678,10 @@ void handleRequest(LifxPacket &request) {
         sendPacket(response);
 
         /*
-        // respond again to get command (real bulbs respond twice, slightly diff data (see below)
-        response.packet_type = VERSION_STATE;
-        response.protocol = LifxProtocol_AllBulbsResponse;
-        byte VersionData2[] = {
+          // respond again to get command (real bulbs respond twice, slightly diff data (see below)
+          response.packet_type = VERSION_STATE;
+          response.protocol = LifxProtocol_AllBulbsResponse;
+          byte VersionData2[] = {
           lowByte(LifxVersionVendor), //vendor stays the same
           highByte(LifxVersionVendor),
           0x00,
@@ -574,9 +696,9 @@ void handleRequest(LifxPacket &request) {
           0x00
           };
 
-        memcpy(response.data, VersionData2, sizeof(VersionData2));
-        response.data_size = sizeof(VersionData2);
-        sendPacket(response);
+          memcpy(response.data, VersionData2, sizeof(VersionData2));
+          response.data_size = sizeof(VersionData2);
+          sendPacket(response);
         */
       }
       break;
@@ -628,8 +750,8 @@ void handleRequest(LifxPacket &request) {
 
     default:
       {
-          debug_print(F("Unknown packet type: "));
-          debug_println(request.packet_type, DEC);
+        debug_print(F("Unknown packet type: "));
+        debug_println(request.packet_type, DEC);
       }
       break;
   }
@@ -886,7 +1008,7 @@ void setLight() {
     int this_hue = map(hue, 0, 65535, 0, 767);
     int this_sat = map(sat, 0, 65535, 0, 255);
     int this_bri = map(bri, 0, 65535, 0, 255);
-    
+
     // if we are setting a "white" colour (kelvin temp)
     if (kel > 0 && this_sat < 1) {
       // convert kelvin to RGB
@@ -908,27 +1030,28 @@ void setLight() {
     uint8_t r = map(rgbColor[0], 0, 255, 0, 32);
     uint8_t g = map(rgbColor[1], 0, 255, 0, 32);
     uint8_t b = map(rgbColor[2], 0, 255, 0, 32);
-    
+
     // LIFXBulb.fadeHSB(this_hue, this_sat, this_bri);
     leds[0].setRGB( r, g, b);
+    fill_solid( leds, NUM_LEDS, CRGB( r, g, b) );
   }
   else {
 
     // LIFXBulb.fadeHSB(0, 0, 0);
-    leds[0] = CRGB::Black;
+    fill_solid( leds, NUM_LEDS, CRGB( 0, 0, 0) );
   }
   FastLED.show();
 }
 
 /******************************************************************************
- * accepts hue, saturation and brightness values and outputs three 8-bit color
- * values in an array (color[])
- *
- * saturation (sat) and brightness (bright) are 8-bit values.
- *
- * hue (index) is a value between 0 and 767. hue values out of range are
- * rendered as 0.
- *
+   accepts hue, saturation and brightness values and outputs three 8-bit color
+   values in an array (color[])
+
+   saturation (sat) and brightness (bright) are 8-bit values.
+
+   hue (index) is a value between 0 and 767. hue values out of range are
+   rendered as 0.
+
  *****************************************************************************/
 void hsb2rgb(uint16_t index, uint8_t sat, uint8_t bright, uint8_t color[3])
 {
