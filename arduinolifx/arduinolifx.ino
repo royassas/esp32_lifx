@@ -1,5 +1,3 @@
-#include <Esp32WifiManager.h>
-
 /*
   LIFX bulb emulator by Kayne Richens (kayno@kayno.net)
 
@@ -34,6 +32,7 @@
 #include "lifx.h"
 #include "color.h"
 
+
 #define EEPROM_SIZE 256
 
 // define to output debug messages (including packet dumps) to serial (38400 baud)
@@ -46,6 +45,7 @@
 #define debug_print(x, ...)
 #define debug_println(x, ...)
 #endif
+
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
@@ -62,32 +62,7 @@ byte site_mac[] = {
 #define CLOCK_PIN 27
 CRGB leds[NUM_LEDS];
 
-// label (name) for this bulb
-char bulbLabel[LifxBulbLabelLength] = "Nachtlicht";
-
-// tags for this bulb
-char bulbTags[LifxBulbTagsLength] = {
-  0, 0, 0, 0, 0, 0, 0, 0
-};
-char bulbTagLabels[LifxBulbTagLabelsLength] = "";
-
-//location for this bulb
-byte location[] = {
-  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15, 0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
-};
-char bulbLocationLabel[LifxBulbLocationLabelLength] = "Nirvana";
-byte loc_updatedAt[] = {
-  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
-};
-
-//group for this bulb
-byte group[] = {
-  0x00, 0xc3, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15, 0x00, 0xc2, 0x39, 0x63, 0x7a, 0x14, 0x9e, 0x15
-};
-char bulbGroupLabel[LifxBulbGroupLabelLength] = "Mobil";
-byte group_updatedAt[] = {
-  0x00, 0xc2, 0x38, 0x63, 0x7a, 0x14, 0x9e, 0x15
-};
+#include "bulbDefaults.h"
 
 // initial bulb values - warm white!
 long power_status = 65535;
@@ -103,7 +78,7 @@ WiFiServer TcpServer(LifxPort);
 WiFiClient client;
 WifiManager wifiManager;
 
-
+#include "eepromIO.h"
 void setup() {
 
   Serial.begin(115200);
@@ -115,6 +90,7 @@ void setup() {
   {
     Serial.println("failed to initialise EEPROM"); delay(1000000);
   }
+  
   // WIFI
   wifiManager.setup();
 
@@ -131,73 +107,13 @@ void setup() {
   Udp.begin(LifxPort);
   TcpServer.begin();
 
-  // read in settings from EEPROM (if they exist) for bulb label and tags
-  if (EEPROM.read(EEPROM_CONFIG_START) == EEPROM_CONFIG[0]
-      && EEPROM.read(EEPROM_CONFIG_START + 1) == EEPROM_CONFIG[1]
-      && EEPROM.read(EEPROM_CONFIG_START + 2) == EEPROM_CONFIG[2]) {
-    debug_println(F("Config exists in EEPROM, reading..."));
-    debug_print(F("Bulb label: "));
-
-    for (int i = 0; i < LifxBulbLabelLength; i++) {
-      bulbLabel[i] = EEPROM.read(EEPROM_BULB_LABEL_START + i);
-      debug_print(bulbLabel[i]);
-    }
-
-    debug_println();
-    debug_print(F("Bulb tags: "));
-
-    for (int i = 0; i < LifxBulbTagsLength; i++) {
-      bulbTags[i] = EEPROM.read(EEPROM_BULB_TAGS_START + i);
-      debug_print(bulbTags[i]);
-    }
-
-    debug_println();
-    debug_print(F("Bulb tag labels: "));
-
-    for (int i = 0; i < LifxBulbTagLabelsLength; i++) {
-      bulbTagLabels[i] = EEPROM.read(EEPROM_BULB_TAG_LABELS_START + i);
-      debug_print(bulbTagLabels[i]);
-    }
-
-    debug_println();
-    debug_print(F("Bulb Location: "));
-
-    for (int i = 0; i < LifxBulbLocationLabelLength; i++) {
-      bulbLocationLabel[i] = EEPROM.read(EEPROM_LOCATION_START + LifxBulbLocationIDLength + i);
-      debug_print(bulbLocationLabel[i]);
-    }
-
-    debug_println();
-    debug_println(F("Done reading EEPROM config."));
+  if (eepromExists()) {
+    readEepromDefaults();
   } else {
-    // first time sketch has been run, set defaults into EEPROM
-    debug_println(F("Config does not exist in EEPROM, writing..."));
-
-    EEPROM.write(EEPROM_CONFIG_START, EEPROM_CONFIG[0]);
-    EEPROM.write(EEPROM_CONFIG_START + 1, EEPROM_CONFIG[1]);
-    EEPROM.write(EEPROM_CONFIG_START + 2, EEPROM_CONFIG[2]);
-
-    for (int i = 0; i < LifxBulbLabelLength; i++) {
-      EEPROM.write(EEPROM_BULB_LABEL_START + i, bulbLabel[i]);
-    }
-
-    for (int i = 0; i < LifxBulbTagsLength; i++) {
-      EEPROM.write(EEPROM_BULB_TAGS_START + i, bulbTags[i]);
-    }
-
-    for (int i = 0; i < LifxBulbTagLabelsLength; i++) {
-      EEPROM.write(EEPROM_BULB_TAG_LABELS_START + i, bulbTagLabels[i]);
-    }
-    EEPROM.commit();
-    debug_println(F("Done writing EEPROM config."));
+    writeEepromDefaults();
   }
 
-  debug_println(F("EEPROM dump:"));
-  for (int i = 0; i < 256; i++) {
-    debug_print(EEPROM.read(i));
-    debug_print(SPACE);
-  }
-  debug_println();
+dumpEeprom();
 
   // set the bulb based on the initial colors
   setLight();
@@ -273,7 +189,7 @@ void loop() {
   delay (0);
 }
 
-void processRequest(byte *packetBuffer, int packetSize, LifxPacket &request) {
+void processRequest(byte * packetBuffer, int packetSize, LifxPacket & request) {
 
   request.size        = packetBuffer[0] + (packetBuffer[1] << 8); //little endian
   request.protocol    = packetBuffer[2] + (packetBuffer[3] << 8); //little endian
@@ -305,8 +221,8 @@ void processRequest(byte *packetBuffer, int packetSize, LifxPacket &request) {
   request.data_size = i;
 }
 
-void handleRequest(LifxPacket &request) {
-  debug_print(F("  Received packet type "));
+void handleRequest(LifxPacket & request) {
+  debug_print(F("  Received packet type 0x"));
   debug_println(request.packet_type, HEX);
 
   LifxPacket response;
@@ -481,7 +397,7 @@ void handleRequest(LifxPacket &request) {
           if (flag == 1) {
             debug_print("Bulb label has changed - writing to EEPROM... ");
             EEPROM.commit();
-            debug_print("complete!");
+            debug_println("complete!");
           }
 
         }
@@ -504,6 +420,7 @@ void handleRequest(LifxPacket &request) {
           int flag = 0;
           for (int i = 0; i < LifxBulbTagsLength; i++) {
             if (bulbTags[i] != request.data[i]) {
+              flag = 1;
               bulbTags[i] = lowByte(request.data[i]);
               EEPROM.write(EEPROM_BULB_TAGS_START + i, request.data[i]);
             }
@@ -511,7 +428,7 @@ void handleRequest(LifxPacket &request) {
           if (flag == 1) {
             debug_print("Bulb tags have changed - writing to EEPROM... ");
             EEPROM.commit();
-            debug_print("complete!");
+            debug_println("complete!");
           }
         }
 
@@ -533,6 +450,7 @@ void handleRequest(LifxPacket &request) {
           int flag = 0;
           for (int i = 0; i < LifxBulbTagLabelsLength; i++) {
             if (bulbTagLabels[i] != request.data[i]) {
+              flag = 1;
               bulbTagLabels[i] = request.data[i];
               EEPROM.write(EEPROM_BULB_TAG_LABELS_START + i, request.data[i]);
             }
@@ -540,7 +458,7 @@ void handleRequest(LifxPacket &request) {
           if (flag == 1) {
             debug_print("Bulb tag labels have changed - writing to EEPROM... ");
             EEPROM.commit();
-            debug_print("complete!");
+            debug_println("complete!");
           }
         }
 
@@ -561,30 +479,35 @@ void handleRequest(LifxPacket &request) {
           for (int i = 0; i < (LifxBulbLocationIDLength + LifxBulbLocationLabelLength + LifxBulbLocationUpdatedAtLength); i++) {
             if (i < LifxBulbLocationIDLength) {
               if (location[i] != request.data[i]) {
+                flag = 1;
                 location[i] = request.data[i];
                 EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
               }
             } else if (i < LifxBulbLocationLabelLength) {
               if (bulbLocationLabel[i] != request.data[i]) {
+                flag = 1;
                 bulbLocationLabel[i] = request.data[i];
                 EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
               }
             } else {
               if (loc_updatedAt[i] != request.data[i]) {
+                flag = 1;
                 loc_updatedAt[i] = request.data[i];
                 EEPROM.write(EEPROM_LOCATION_START + i, request.data[i]);
               }
             }
+            
 
           }
           if (flag == 1) {
             debug_print("Bulb location has changed - writing to EEPROM... ");
             EEPROM.commit();
-            debug_print("complete!");
+            debug_println("complete!");
+            dumpEeprom();
           }
         }
 
-        // respond to both get and set commands
+        // respond to both get and set commands with state
         response.packet_type = DEVICE_STATE_LOCATION;
         response.protocol = LifxProtocol_AllBulbsResponse;
         byte LocationData[] = {
@@ -649,7 +572,7 @@ void handleRequest(LifxPacket &request) {
           lowByte(loc_updatedAt[7])
         };
         memcpy(response.data, LocationData, sizeof(LocationData));
-        response.data_size = sizeof(LocationData);
+        response.data_size = sizeof(LocationData); 
         sendPacket(response);
       }
       break;
@@ -750,14 +673,14 @@ void handleRequest(LifxPacket &request) {
 
     default:
       {
-        debug_print(F("Unknown packet type: "));
-        debug_println(request.packet_type, DEC);
+        debug_print(F("Unknown packet type: 0x"));
+        debug_println(request.packet_type, HEX);
       }
       break;
   }
 }
 
-void sendPacket(LifxPacket &pkt) {
+void sendPacket(LifxPacket & pkt) {
   sendUDPPacket(pkt);
 
   if (client.connected()) {
@@ -765,7 +688,7 @@ void sendPacket(LifxPacket &pkt) {
   }
 }
 
-unsigned int sendUDPPacket(LifxPacket &pkt) {
+unsigned int sendUDPPacket(LifxPacket & pkt) {
   // broadcast packet on local subnet
   IPAddress remote_addr(Udp.remoteIP());
   IPAddress broadcast_addr(remote_addr[0], remote_addr[1], remote_addr[2], 255);
@@ -836,7 +759,7 @@ unsigned int sendUDPPacket(LifxPacket &pkt) {
   return LifxPacketSize + pkt.data_size;
 }
 
-unsigned int sendTCPPacket(LifxPacket &pkt) {
+unsigned int sendTCPPacket(LifxPacket & pkt) {
 
   debug_print(F("+TCP "));
   printLifxPacket(pkt);
@@ -906,7 +829,7 @@ unsigned int sendTCPPacket(LifxPacket &pkt) {
 }
 
 // print out a LifxPacket data structure as a series of hex bytes - used for DEBUG
-void printLifxPacket(LifxPacket &pkt) {
+void printLifxPacket(LifxPacket & pkt) {
   // size
   debug_print(lowByte(LifxPacketSize + pkt.data_size), HEX);
   debug_print(SPACE);
