@@ -57,9 +57,9 @@ byte site_mac[] = {
 }; // spells out "LIFXV2" - version 2 of the app changes the site address to this...
 
 //WS2801 for FastLED
-#define NUM_LEDS 10
-#define DATA_PIN 26
-#define CLOCK_PIN 27
+#define NUM_LEDS 5
+#define DATA_PIN 16
+#define CLOCK_PIN 17
 CRGB leds[NUM_LEDS];
 
 #include "bulbDefaults.h"
