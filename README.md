@@ -22,8 +22,8 @@ Uses the following code/libraries:
 - [FastLED](http://fastled.io/) - MIT 2013 as of 19.05.2019
 - [Esp32WifiManager](https://github.com/madhephaestus/Esp32WifiManager) - GNU GPL v3.0 as of 19.05.2019
 
-##Contribution
+## Contribution
 Yes, please!
 
-##License
+## License
 To be decided...
